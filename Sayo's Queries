@@ -1,0 +1,42 @@
+-- MAU Retention and Churn analysis filtering by number of presentations
+WITH  monthly_activity as (
+      SELECT distinct
+      date_trunc(date(timestamp), month) as month,
+      teacher user_id
+      FROM `production-segment-bq.internal_analysis_dataset.student_responded`
+),    active_in_20172018 as (
+      SELECT *
+      FROM monthly_activity
+      WHERE month BETWEEN "2017-10-01" AND "2018-09-01"
+),    num_presentations1718 as (
+      SELECT teacher user_id, count (distinct presentation) num_presentations
+      FROM `production-segment-bq.internal_analysis_dataset.student_responded`
+      WHERE timestamp >= "2017-10-01" AND timestamp <= "2018-09-01"
+      GROUP BY user_id
+      HAVING num_presentations > 1
+),    active_in_20172018_filter as (
+      SELECT user_id
+      FROM active_in_20172018 JOIN num_presentations1718
+      USING (user_id)
+),    active_in_20182019 as (
+      SELECT *
+      FROM monthly_activity
+      WHERE month BETWEEN "2018-10-01" AND "2019-09-01"
+),    churned_accounts as (
+      SELECT s.user_id
+      FROM num_presentations1718 s 
+      LEFT JOIN active_in_20182019 e 
+      ON s.user_id=e.user_id 
+	    WHERE e.user_id is null
+),    start_count as ( 
+	    SELECT count (distinct user_id) as n_start from num_presentations1718
+),    end_count as ( 
+	    SELECT 	count(distinct user_id) as n_end from active_in_20182019
+),    churn_count as (
+	    SELECT 	count(distinct user_id) as n_churn from churned_accounts
+)
+select 
+	CAST (n_churn/n_start as FLOAT64) as churn_rate,
+	CAST (1.0-(n_churn/n_start) as FLOAT64) as retention_rate,
+	n_start, n_end,	n_churn 
+FROM start_count, end_count, churn_count
